@@ -11,20 +11,15 @@ st.set_page_config(page_title="401K Allocation Strategy", layout="wide")
 st.markdown(
     """
     <style>
-    /* Clean, soft gray background reminiscent of Apple.com */
     .stApp { 
         background-color: #f5f5f7 !important; 
         color: #1d1d1f !important; 
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     }
-    
-    /* Elegant Sidebar with crisp background */
     section[data-testid="stSidebar"] { 
         background-color: #ffffff !important; 
         border-right: 1px solid #e5e5e7 !important; 
     }
-    
-    /* Smooth, rounded white content cards */
     div[data-testid="metric-container"] { 
         background: #ffffff !important; 
         border: 1px solid #e5e5e7 !important; 
@@ -32,15 +27,12 @@ st.markdown(
         border-radius: 16px !important; 
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.02) !important;
     }
-    
-    /* Bold, clean typography for key metrics */
     div[data-testid="stMetricValue"] { 
         color: #1d1d1f !important; 
         font-weight: 600 !important;
         font-size: 2.2rem !important;
         letter-spacing: -1px;
     }
-    
     div[data-testid="stMetricLabel"] { 
         color: #86868b !important; 
         text-transform: none !important;
@@ -48,14 +40,11 @@ st.markdown(
         font-size: 0.95rem !important;
         letter-spacing: 0px !important;
     }
-    
-    /* Typography adjustments */
     h1, h2, h3 { 
         color: #1d1d1f !important; 
         font-weight: 600 !important;
         letter-spacing: -0.5px;
     }
-    
     .apple-title { 
         font-size: 2.5rem;
         font-weight: 700;
@@ -63,7 +52,6 @@ st.markdown(
         letter-spacing: -1.5px;
         margin-bottom: 4px;
     }
-    
     .apple-subtitle {
         font-size: 1.1rem;
         color: #86868b;
@@ -74,12 +62,11 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# Simple, Clean Title Block
 st.markdown('<div class="apple-title">401K Allocation Strategy</div>', unsafe_allow_html=True)
 st.markdown('<div class="apple-subtitle">Smart, automated portfolio balancing made effortless.</div>', unsafe_allow_html=True)
 st.markdown("---")
 
-# 2. Complete Asset Universe (All 21 Funds)
+# 2. Asset Universe
 FUNDS = {
     "VFIAX": "S&P 500 Index",
     "VFTAX": "Social Index",
@@ -105,7 +92,7 @@ FUNDS = {
 }
 tickers = list(FUNDS.keys())
 
-# 3. Sidebar Control Interface Layout
+# 3. Sidebar Controls
 st.sidebar.markdown("### Controls")
 sandbox_mode = st.sidebar.checkbox("💡 Enable Manual Sandbox Mode", value=False)
 st.sidebar.markdown("---")
@@ -126,15 +113,28 @@ else:
     total_allocated = sum(user_weights.values())
     st.sidebar.metric("Total Mix Allocated", f"{total_allocated*100:.1f}%")
 
-# 4. Pure Python Data & Math Processing
+# 4. Pure Python Data & Math Processing (UPDATED)
 @st.cache_data(ttl=86400)
 def fetch_live_data(tickers_list, years):
     end = pd.Timestamp.now()
     start = end - pd.DateOffset(years=years)
     try:
-        df = yf.download(tickers_list, start=start, end=end)["Close"]
-        return df[tickers_list].ffill().dropna()
-    except:
+        # group=True helps handle multi-ticker cleaner on cloud servers
+        data = yf.download(tickers_list, start=start, end=end, group_by='ticker')
+        
+        # Extract just the Close prices safely
+        close_df = pd.DataFrame()
+        for t in tickers_list:
+            if t in data:
+                close_df[t] = data[t]['Close']
+            else:
+                # Fallback if ticker structure is flat
+                close_df = data['Close']
+                break
+                
+        return close_df[tickers_list].ffill().dropna()
+    except Exception as e:
+        st.sidebar.error(f"Data Fetch Diagnostic: {str(e)}")
         return pd.DataFrame()
 
 prices = fetch_live_data(tickers, lookback_years)
@@ -183,11 +183,9 @@ if not prices.empty:
     summary_df["Target Allocation"] = summary_df["Target Allocation"] * 100
 
     summary_df = summary_df.sort_values(by="Target Allocation", ascending=False)
-    
-    # CRITICAL FIX: Isolate ONLY recommended funds with allocations strictly above 0%
     top_funds = summary_df[summary_df["Target Allocation"] > 0.001]
 
-    # 5. Dynamic Visual Target Mix Cards Section
+    # 5. Target Mix Cards
     if sandbox_mode:
         p_ret_print, p_vol_print = calc_stats(final_weights)
         st.markdown("### Portfolio Metrics")
@@ -200,13 +198,11 @@ if not prices.empty:
         
         if num_recommended_funds == 0:
             st.info("No funds selected. Adjust constraints to generate allocation profiles.")
-        # If there's a small group of funds, layout horizontally like Apple's device comparison charts
         elif num_recommended_funds <= 5:
             cols = st.columns(num_recommended_funds)
             for idx, (ticker, row) in enumerate(top_funds.iterrows()):
                 with cols[idx]:
                     st.metric(label=f"Allocate to {ticker}", value=f"{row['Target Allocation']:.1f}%")
-        # Layout in an elegant grid format if there are more than 5 metrics to prevent clipping
         else:
             grid_cols = st.columns(4)
             for idx, (ticker, row) in enumerate(top_funds.iterrows()):
@@ -217,7 +213,7 @@ if not prices.empty:
 
     st.markdown("---")
 
-    # 6. Premium Clean Visualizations Panel
+    # 6. Visualizations
     l_col1, l_col2 = st.columns([4, 6])
     with l_col1:
         st.markdown("### Distribution")
@@ -267,7 +263,7 @@ if not prices.empty:
         )
         st.plotly_chart(fig_scatter, use_container_width=True)
 
-    # 7. Core Fund Ledger Table
+    # 7. Fund Table
     st.markdown("### Performance Overview")
     st.dataframe(
         summary_df.style.format({
@@ -278,4 +274,4 @@ if not prices.empty:
         use_container_width=True,
     )
 else:
-    st.error("Data Feed Offline: Unable to download current market tickers.")
+    st.error("Data Feed Offline: Unable to download current market tickers. Try shifting your historical timeline window in the sidebar to reset the stream connection.")
